@@ -1,6 +1,8 @@
 import express from 'express';
+import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
+
 
 // Load environment variables from .env file (Hosting Panel / Local Environment)
 dotenv.config();
