@@ -1,0 +1,20 @@
+{
+  "name": "flai-backend-server",
+  "version": "1.0.0",
+  "description": "Standalone Production Backend API Server for FLAI (server.js + Express + dotenv + Gemini + Firebase)",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@google/genai": "^2.32.0",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "firebase": "^13.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
