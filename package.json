@@ -16,6 +16,7 @@
     "express": "^4.21.2",
     "firebase": "^13.2.0",
     "google-auth-library": "^9.0.0",
+    "merge-descriptors": "^1.0.1",
     "node-fetch": "^3.3.2",
     "p-retry": "^6.2.0",
     "ws": "^8.16.0"
