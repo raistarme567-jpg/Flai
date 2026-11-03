@@ -10,12 +10,10 @@
   },
   "dependencies": {
     "@google/genai": "^2.32.0",
+    "body-parser": "^1.20.3",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
-    "firebase": "^13.2.0",
-    "p-retry": "^6.2.0",
-    "google-auth-library": "^9.0.0",
-    "ws": "^8.16.0"
+    "firebase": "^13.2.0"
   },
   "engines": {
     "node": ">=18.0.0"
