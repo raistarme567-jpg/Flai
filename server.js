@@ -1,8 +1,6 @@
 import express from 'express';
-import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
-
 
 // Load environment variables from .env file (Hosting Panel / Local Environment)
 dotenv.config();
@@ -25,24 +23,28 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '25mb' }));
 
-// In-Memory Stores & Live Firebase Mirror (mindsmart-ai)
+// In-Memory Stores & Live Firebase Mirror (gen-lang-client-0618091188)
 const exhaustedModelsUntil = new Map();
 const localKnowledgeCache = new Map();
+const serverTrainerStore = new Map();
 const otpSessionStore = new Map();
 const firebaseCloudMirrorStore = new Map();
 
 let serverFirebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY || 'AIzaSyAtzx0OLyGRJQO3pGwhmkVGdVLUonn0ezA',
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || 'mindsmart-ai.firebaseapp.com',
+  apiKey: process.env.VITE_FIREBASE_API_KEY || 'AIzaSyARNYA3XdLVjKqOfZuwfvQ-aNmIVAhbAeE',
+  authDomain:
+    process.env.VITE_FIREBASE_AUTH_DOMAIN || 'gen-lang-client-0618091188.firebaseapp.com',
   databaseURL:
     process.env.VITE_FIREBASE_DATABASE_URL ||
     'https://mindsmart-ai-default-rtdb.firebaseio.com',
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'mindsmart-ai',
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || 'mindsmart-ai.firebasestorage.app',
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '119706191791',
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0618091188',
+  storageBucket:
+    process.env.VITE_FIREBASE_STORAGE_BUCKET || 'gen-lang-client-0618091188.firebasestorage.app',
+  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '778426276595',
   appId:
-    process.env.VITE_FIREBASE_APP_ID || '1:119706191791:web:0557c17d5d5fb67941d15a',
-  measurementId: process.env.VITE_FIREBASE_MEASUREMENT_ID || 'G-8FDH818Q29',
+    process.env.VITE_FIREBASE_APP_ID || '1:778426276595:web:c64b6d3782f982b0fb7586',
+  firestoreDatabaseId: 'ai-studio-flaifuturelevela-7c657526-20af-4291-a22f-f34114a799f6',
+  measurementId: process.env.VITE_FIREBASE_MEASUREMENT_ID || '',
 };
 
 let dynamicPrivacyPolicyText =
@@ -106,6 +108,41 @@ function getAiClient(customKey) {
   });
 }
 
+function sanitizeGeminiContents(rawContents) {
+  if (typeof rawContents === 'string') {
+    const trimmed = rawContents.trim();
+    return trimmed.length > 0 ? trimmed : 'Hello FLAI';
+  }
+  if (Array.isArray(rawContents)) {
+    const cleaned = rawContents
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        if (Array.isArray(item.parts)) {
+          const validParts = item.parts.filter((p) => {
+            if (!p || typeof p !== 'object') return false;
+            if (typeof p.text === 'string') {
+              p.text = p.text.trim();
+              return p.text.length > 0;
+            }
+            if (p.inlineData && p.inlineData.data) return true;
+            return false;
+          });
+          if (validParts.length === 0) return null;
+          return {
+            role: item.role === 'model' || item.role === 'assistant' ? 'model' : 'user',
+            parts: validParts,
+          };
+        }
+        return item;
+      })
+      .filter(Boolean);
+    return cleaned.length > 0
+      ? cleaned
+      : [{ role: 'user', parts: [{ text: 'Hello FLAI' }] }];
+  }
+  return rawContents;
+}
+
 async function generateWithGeminiCascade(ai, params) {
   const candidateModels = [
     'gemini-3.8-flash',
@@ -116,19 +153,27 @@ async function generateWithGeminiCascade(ai, params) {
   const now = Date.now();
   const availableModels = candidateModels.filter((m) => (exhaustedModelsUntil.get(m) || 0) <= now);
   const modelsToTry = availableModels.length > 0 ? availableModels : candidateModels;
+  const safeContents = sanitizeGeminiContents(params.contents);
 
   let lastError = null;
   for (const modelName of modelsToTry) {
     try {
-      const mergedConfig = {
-        ...params.config,
-        ...(modelName === 'gemini-3.8-flash'
-          ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
-          : {}),
-      };
+      const mergedConfig = { ...(params.config || {}) };
+      delete mergedConfig.temperature;
+      delete mergedConfig.topP;
+      delete mergedConfig.topK;
+      delete mergedConfig.maxOutputTokens;
+      delete mergedConfig.thinkingBudget;
+      if (modelName === 'gemini-3.8-flash') {
+        mergedConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+      } else if (modelName === 'gemini-3.1-flash-lite') {
+        mergedConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+      } else {
+        delete mergedConfig.thinkingConfig;
+      }
       return await ai.models.generateContent({
         model: modelName,
-        contents: params.contents,
+        contents: safeContents,
         config: mergedConfig,
       });
     } catch (err) {
@@ -270,6 +315,14 @@ app.post('/api/flai/firebase/config', (req, res) => {
   res.json({ saved: true, config: serverFirebaseConfig });
 });
 
+app.get('/api/flai/firebase/sync', (req, res) => {
+  const collection = String(req.query.collection || 'default');
+  const docId = String(req.query.docId || 'doc');
+  const key = `${collection}/${docId}`;
+  const data = firebaseCloudMirrorStore.get(key) || null;
+  res.json({ found: Boolean(data), key, data });
+});
+
 app.post('/api/flai/firebase/sync', (req, res) => {
   const { collection = 'default', docId = 'doc', data = {} } = req.body || {};
   const key = `${collection}/${docId}`;
@@ -279,6 +332,155 @@ app.post('/api/flai/firebase/sync', (req, res) => {
     syncedAt: new Date().toISOString(),
   });
   res.json({ synced: true, key, totalDocs: firebaseCloudMirrorStore.size });
+});
+
+// ============================================================================
+// REAL-TIME IP & DEVICE BINDING + AUTHENTICATION & ADMIN TELEMETRY ROUTES
+// ============================================================================
+const serverDeviceBindings = new Map();
+const serverUsersByEmail = new Map();
+let serverAdminTelemetryLogs = [];
+let serverAdminErrorLogs = [];
+
+const extractClientIp = (req) => {
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.trim()) {
+    return xff.split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress || '127.0.0.1';
+};
+
+app.get('/api/flai/auth/device-check', (req, res) => {
+  const deviceId = String(req.query.deviceId || '').trim();
+  const clientIp = String(req.query.ip || extractClientIp(req)).trim();
+  const bound =
+    serverDeviceBindings.get(deviceId) ||
+    firebaseCloudMirrorStore.get(`device_bindings/${deviceId}`);
+  if (bound && bound.email) {
+    res.json({
+      bound: true,
+      deviceId: bound.deviceId || deviceId,
+      ipAddress: clientIp,
+      user: {
+        uid: String(bound.uid || ''),
+        email: String(bound.email || ''),
+        displayName: String(bound.displayName || ''),
+        username: String(bound.username || ''),
+        phone: String(bound.phone || ''),
+        provider: bound.provider === 'google' ? 'google' : 'email_password',
+        activeSession: Boolean(bound.activeSession),
+      },
+    });
+    return;
+  }
+  res.json({ bound: false, deviceId, ipAddress: clientIp });
+});
+
+app.post('/api/flai/auth/register', (req, res) => {
+  const { uid, email, displayName, username, phone, deviceId, ipAddress, passwordHash } =
+    req.body || {};
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const resolvedIp = String(ipAddress || extractClientIp(req)).trim();
+  const record = {
+    uid: String(uid || 'flai_usr_' + Date.now()),
+    email: cleanEmail,
+    displayName: String(displayName || 'Verified User').trim(),
+    username: String(username || cleanEmail.split('@')[0]).trim(),
+    phone: String(phone || '').trim(),
+    deviceId: String(deviceId || '').trim(),
+    ipAddress: resolvedIp,
+    passwordHash: String(passwordHash || ''),
+    provider: 'email_password',
+    activeSession: true,
+    updatedAt: new Date().toISOString(),
+  };
+  serverUsersByEmail.set(cleanEmail, record);
+  if (record.deviceId) {
+    serverDeviceBindings.set(record.deviceId, record);
+    firebaseCloudMirrorStore.set(`device_bindings/${record.deviceId}`, record);
+  }
+  firebaseCloudMirrorStore.set(`users/${record.uid}`, record);
+  res.json({ registered: true, user: record });
+});
+
+app.post('/api/flai/auth/login', (req, res) => {
+  const { email, passwordHash, deviceId, ipAddress, displayName } = req.body || {};
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const resolvedIp = String(ipAddress || extractClientIp(req)).trim();
+  const existing = serverUsersByEmail.get(cleanEmail);
+  if (existing && existing.passwordHash && passwordHash && existing.passwordHash !== passwordHash) {
+    res.status(401).json({ error: 'Invalid password' });
+    return;
+  }
+  const updated = {
+    uid: existing?.uid || 'flai_usr_' + cleanEmail.replace(/[^a-z0-9]/g, '_'),
+    email: cleanEmail,
+    displayName: existing?.displayName || displayName || cleanEmail.split('@')[0],
+    username: existing?.username || cleanEmail.split('@')[0],
+    phone: existing?.phone || '+91 Verified',
+    deviceId: String(deviceId || existing?.deviceId || ''),
+    ipAddress: resolvedIp,
+    passwordHash: existing?.passwordHash || String(passwordHash || ''),
+    provider: 'email_password',
+    activeSession: true,
+    updatedAt: new Date().toISOString(),
+  };
+  serverUsersByEmail.set(cleanEmail, updated);
+  if (updated.deviceId) {
+    serverDeviceBindings.set(updated.deviceId, updated);
+    firebaseCloudMirrorStore.set(`device_bindings/${updated.deviceId}`, updated);
+  }
+  res.json({ loggedIn: true, user: updated });
+});
+
+app.post('/api/flai/auth/device-unbind', (req, res) => {
+  const { deviceId } = req.body || {};
+  const key = String(deviceId || '').trim();
+  if (key && serverDeviceBindings.has(key)) {
+    const curr = serverDeviceBindings.get(key);
+    serverDeviceBindings.set(key, { ...curr, activeSession: false });
+  }
+  res.json({ unbound: true });
+});
+
+app.get('/api/flai/admin/telemetry', (req, res) => {
+  res.json({
+    clientIp: extractClientIp(req),
+    activities: serverAdminTelemetryLogs,
+    errors: serverAdminErrorLogs,
+  });
+});
+
+app.post('/api/flai/admin/telemetry', (req, res) => {
+  const body = req.body || {};
+  const entry = {
+    ...body,
+    id: body.id || 'act_' + Date.now(),
+    ipAddress:
+      body.ipAddress && body.ipAddress !== '0.0.0.0' ? body.ipAddress : extractClientIp(req),
+    timestamp: body.timestamp || new Date().toLocaleString('en-IN'),
+    lastActiveIso: new Date().toISOString(),
+  };
+  serverAdminTelemetryLogs = [
+    entry,
+    ...serverAdminTelemetryLogs.filter((item) => item.deviceId !== entry.deviceId),
+  ].slice(0, 60);
+  firebaseCloudMirrorStore.set('admin_logs/activity', { entries: serverAdminTelemetryLogs });
+  res.json({ logged: true, entry });
+});
+
+app.post('/api/flai/admin/errors', (req, res) => {
+  const body = req.body || {};
+  const errEntry = {
+    ...body,
+    id: body.id || 'err_' + Date.now(),
+    ipAddress:
+      body.ipAddress && body.ipAddress !== '0.0.0.0' ? body.ipAddress : extractClientIp(req),
+    timestamp: body.timestamp || new Date().toLocaleString('en-IN'),
+  };
+  serverAdminErrorLogs = [errEntry, ...serverAdminErrorLogs].slice(0, 60);
+  firebaseCloudMirrorStore.set('admin_logs/error_logs', { entries: serverAdminErrorLogs });
+  res.json({ logged: true, errorEntry: errEntry });
 });
 
 // ============================================================================
@@ -408,9 +610,69 @@ app.post('/api/flai/cache', (req, res) => {
   res.json({ saved: true, totalEntries: localKnowledgeCache.size });
 });
 
+app.get('/api/flai/firebase/status', (_req, res) => {
+  res.json({
+    connected: true,
+    projectId: serverFirebaseConfig.projectId,
+    firestoreDatabaseId: serverFirebaseConfig.firestoreDatabaseId,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/api/flai/trainer', (req, res) => {
+  const userId = String(req.query.userId || 'default_user').trim();
+  const commands = serverTrainerStore.get(userId) || [];
+  res.json({ userId, commands, count: commands.length });
+});
+
+app.post('/api/flai/trainer', (req, res) => {
+  const { id, userId = 'default_user', command, answer, createdAt } = req.body || {};
+  const cleanCmd = String(command || '').trim();
+  const cleanAns = String(answer || '').trim();
+  const cleanUid = String(userId || 'default_user').trim();
+  if (!cleanCmd || !cleanAns) {
+    res.status(400).json({ error: 'Both command and answer are required' });
+    return;
+  }
+  const record = {
+    id: String(id || 'cmd_' + Date.now()),
+    userId: cleanUid,
+    command: cleanCmd,
+    answer: cleanAns,
+    createdAt: String(
+      createdAt || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    ),
+  };
+  const existing = serverTrainerStore.get(cleanUid) || [];
+  const updated = [
+    record,
+    ...existing.filter((item) => item.command.toLowerCase() !== cleanCmd.toLowerCase()),
+  ];
+  serverTrainerStore.set(cleanUid, updated);
+  localKnowledgeCache.set(cleanCmd.toLowerCase(), {
+    reply: cleanAns,
+    category: `trainer_${cleanUid}`,
+  });
+  firebaseCloudMirrorStore.set(`trainer_data/${cleanUid}/commands/${record.id}`, record);
+  res.json({ saved: true, record, commands: updated });
+});
+
+app.delete('/api/flai/trainer/:id', (req, res) => {
+  const cmdId = String(req.params.id || '').trim();
+  const userId = String(req.query.userId || 'default_user').trim();
+  const existing = serverTrainerStore.get(userId) || [];
+  const removed = existing.find((item) => item.id === cmdId);
+  if (removed) {
+    localKnowledgeCache.delete(removed.command.toLowerCase());
+  }
+  const updated = existing.filter((item) => item.id !== cmdId);
+  serverTrainerStore.set(userId, updated);
+  res.json({ deleted: true, id: cmdId, commands: updated });
+});
+
 app.post('/api/flai/otp/send', (req, res) => {
-  const { phone } = req.body || {};
-  const cleanPhone = String(phone || '').replace(/[^\d+]/g, '').trim();
+  const { phone, phoneNumber } = req.body || {};
+  const cleanPhone = String(phone || phoneNumber || '').replace(/[^\d+]/g, '').trim();
   if (cleanPhone.length < 10) {
     res.status(400).json({ error: 'Valid 10-digit mobile number required' });
     return;
@@ -423,15 +685,16 @@ app.post('/api/flai/otp/send', (req, res) => {
   res.json({
     success: true,
     phone: cleanPhone,
+    otpDispatched: otpCode,
     deviceOtpCode: otpCode,
     expiresInSeconds: 300,
   });
 });
 
 app.post('/api/flai/otp/verify', (req, res) => {
-  const { phone, otp } = req.body || {};
-  const cleanPhone = String(phone || '').replace(/[^\d+]/g, '').trim();
-  const cleanOtp = String(otp || '').trim();
+  const { phone, phoneNumber, otp, otpCode } = req.body || {};
+  const cleanPhone = String(phone || phoneNumber || '').replace(/[^\d+]/g, '').trim();
+  const cleanOtp = String(otp || otpCode || '').trim();
   const session = otpSessionStore.get(cleanPhone);
 
   if (!session || Date.now() > session.expiresAt || session.otp !== cleanOtp) {
@@ -450,12 +713,16 @@ app.post('/api/flai/otp/verify', (req, res) => {
 });
 
 // ============================================================================
-// REAL-TIME GEMINI AI AGENT + LIVE CLOCK / CALENDAR + GOOGLE WEB SEARCH
+// REAL-TIME GEMINI AI AGENT + PRIORITY TRAINER ROUTING + GOOGLE WEB SEARCH
+// Supports both `/api/flai/agent` and `/api/chat`
 // ============================================================================
-app.post('/api/flai/agent', async (req, res) => {
+const handleStandaloneChatRequest = async (req, res) => {
   const startTime = Date.now();
   const {
     message,
+    prompt,
+    userId = 'default_user',
+    trainerCommands = [],
     history = [],
     memories = [],
     cachedRules = [],
@@ -465,26 +732,53 @@ app.post('/api/flai/agent', async (req, res) => {
     customApiKey,
   } = req.body || {};
 
-  if (!message || typeof message !== 'string') {
+  const rawInput = typeof message === 'string' && message.trim() ? message : prompt;
+  if (!rawInput || typeof rawInput !== 'string' || !rawInput.trim()) {
     res.status(400).json({ error: 'Message is required' });
     return;
   }
 
+  const cleanMessage = rawInput.trim();
+  const lowerMsg = cleanMessage.toLowerCase();
+
+  // PRIORITY #1 ROUTING: Check User-Trained Commands (`trainer_data/{userId}/commands`) first!
+  const storedUserCommands = serverTrainerStore.get(String(userId)) || [];
+  const combinedTrainerList = [
+    ...(Array.isArray(trainerCommands) ? trainerCommands : []),
+    ...storedUserCommands,
+  ];
+  const trainerMatch = combinedTrainerList.find((item) => {
+    if (!item || typeof item.command !== 'string' || typeof item.answer !== 'string') return false;
+    const trig = item.command.trim().toLowerCase();
+    return trig.length > 0 && (trig === lowerMsg || (trig.length >= 2 && lowerMsg.includes(trig)));
+  });
+
+  if (trainerMatch) {
+    res.json({
+      reply: String(trainerMatch.answer).trim(),
+      toolCalls: [],
+      cached: true,
+      source: `trainer_data/${userId}/commands`,
+      latencyMs: Math.max(1, Date.now() - startTime),
+    });
+    return;
+  }
+
+  const now = new Date();
+  const liveDateStr = now.toLocaleDateString('hi-IN', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+  const liveTimeStr = now.toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+
   try {
     const ai = getAiClient(customApiKey);
-    const now = new Date();
-    const liveDateStr = now.toLocaleDateString('en-IN', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-    const liveTimeStr = now.toLocaleTimeString('en-IN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-
     const memoryContext = Array.isArray(memories)
       ? memories.map((m) => `- ${m.key}: ${m.value}`).join('\n')
       : '';
@@ -502,19 +796,25 @@ Saved User Memory & Custom Rules:
 ${memoryContext}
 ${customCacheContext}
 
-Respond directly, naturally, and accurately in ${language}. Answer any date, weekday, holiday, school status, or live news query accurately.`;
+Respond directly, naturally, and accurately in ${language}. Answer any general knowledge, sports, world facts, date, weekday, holiday, school status, or live news query accurately.`;
+
+    const sanitizedHistory = Array.isArray(history)
+      ? history
+          .slice(-6)
+          .filter((msg) => msg && typeof msg.text === 'string' && msg.text.trim().length > 0)
+          .map((msg) => ({
+            role: msg.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: String(msg.text).trim() }],
+          }))
+      : [];
 
     const contents = [
-      ...history.slice(-8).map((msg) => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: String(msg.text || '') }],
-      })),
-      { role: 'user', parts: [{ text: message }] },
+      ...sanitizedHistory,
+      { role: 'user', parts: [{ text: cleanMessage }] },
     ];
 
-    const lowerMsg = message.toLowerCase();
     const needsWebSearch =
-      /news|weather|score|price|who is|what is|kab|kaun|kya hai|holiday|chhuti|school|tarikh|date|day|vaar|वार|तारीख|आज|कल|परसों|छुट्टी|स्कूल/.test(
+      /news|weather|score|cricket|match|price|who is|what is|kab|kaun|kya hai|holiday|chhuti|school|tarikh|date|day|vaar|वार|तारीख|आज|कल|परसों|छुट्टी|स्कूल/.test(
         lowerMsg
       ) && !/open|launch|kholo|खोलो|tap|dance|jump|block/.test(lowerMsg);
 
@@ -533,19 +833,26 @@ Respond directly, naturally, and accurately in ${language}. Answer any date, wee
       toolCalls: response.functionCalls || [],
       latencyMs: Date.now() - startTime,
     });
-  } catch (err) {
-    const normalized = message.toLowerCase().trim();
-    const cached = localKnowledgeCache.get(normalized);
-    const reply = cached
-      ? cached.reply.replace(/\{userName\}/g, userName)
-      : `${userName}, मैंने आपका कमांड "${message}" रिसीव कर लिया है। बताइए आगे क्या करना है?`;
+  } catch {
+    const cached = localKnowledgeCache.get(lowerMsg);
+    if (cached) {
+      res.json({
+        reply: cached.reply.replace(/\{userName\}/g, userName),
+        toolCalls: [],
+        latencyMs: Date.now() - startTime,
+      });
+      return;
+    }
     res.json({
-      reply,
+      reply: `जी ${userName}! आज **${liveDateStr}** है और अभी लाइव समय **${liveTimeStr}** हो रहा है। बताइए मैं इसमें आपकी और क्या सहायता करूँ?`,
       toolCalls: [],
       latencyMs: Date.now() - startTime,
     });
   }
-});
+};
+
+app.post('/api/flai/agent', handleStandaloneChatRequest);
+app.post('/api/chat', handleStandaloneChatRequest);
 
 // ============================================================================
 // AI IMAGE, VIDEO, TTS & 4-IN-1 GENERATORS
