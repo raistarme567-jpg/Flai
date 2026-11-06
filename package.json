@@ -1,7 +1,7 @@
 {
   "name": "flai-super-agent-backend",
-  "version": "2.1.0",
-  "description": "Full-Featured Production Backend Server for FLAI Super-Agent with All Required SDK Dependencies",
+  "version": "3.0.0",
+  "description": "Full-Loaded Production Backend Server for FLAI Super-Agent with All Possible Dependencies",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -10,18 +10,20 @@
   },
   "dependencies": {
     "@google/genai": "^2.32.0",
-    "p-retry": "^6.2.0",
-    "ws": "^8.18.0",
+    "body-parser": "^1.20.3",
     "bufferutil": "^4.0.8",
-    "utf-8-validate": "^6.0.4",
-    "express": "^4.21.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
+    "express": "^4.21.2",
     "firebase": "^13.2.0",
     "firebase-admin": "^12.7.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "p-retry": "^6.2.0",
+    "utf-8-validate": "^6.0.4",
+    "ws": "^8.18.0"
   },
   "engines": {
     "node": ">=18.0.0"
   }
 }
+
