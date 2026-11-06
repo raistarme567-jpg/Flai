@@ -1,7 +1,7 @@
 {
-  "name": "flai-backend-server",
-  "version": "1.0.0",
-  "description": "Standalone Production Backend API Server for FLAI (server.js + Express + dotenv + Gemini + Firebase)",
+  "name": "flai-super-agent-backend",
+  "version": "2.0.0",
+  "description": "Full-Featured Production Backend Server for FLAI Super-Agent (Express + Gemini + Firebase + Full Dependencies)",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -10,9 +10,13 @@
   },
   "dependencies": {
     "@google/genai": "^2.32.0",
-    "dotenv": "^17.2.3",
+    "p-retry": "^6.2.0",
     "express": "^4.21.2",
-    "firebase": "^13.2.0"
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "firebase": "^13.2.0",
+    "firebase-admin": "^12.7.0",
+    "node-fetch": "^3.3.2"
   },
   "engines": {
     "node": ">=18.0.0"
